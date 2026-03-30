@@ -27,21 +27,20 @@ print(f"VRAM free  : {free:.2f} GB")
 
 # ================================================================
 # 2.  Allen-Cahn parameter
-#     CHANGED vs Wave: eps constant added
 # ================================================================
 eps = 0.01
 pi  = torch.tensor(np.pi, device=device)
 print(f"epsilon    : {eps}")
 
 # ================================================================
-# 3.  Memory budget  (identical to Fourier Trans-PINN Wave)
+# 3.  Memory budget 
 # ================================================================
 N_RES       = 2000
 N_RAR_PROBE = 6000
 N_RAR_KEEP  = 1200
 
 # ================================================================
-# 4.  Fourier Embedding  (IDENTICAL)
+# 4.  Fourier Embedding  
 # ================================================================
 class FourierEmbedding(nn.Module):
     def __init__(self, in_dim=3, n_freq=32, sigma=5.0):
@@ -56,7 +55,7 @@ class FourierEmbedding(nn.Module):
                           torch.cos(proj)], dim=-1)
 
 # ================================================================
-# 5.  Pseudo-sequence  (IDENTICAL)
+# 5.  Pseudo-sequence 
 # ================================================================
 def pseudo_sequence(xt, dx):
     x = xt[:, 0:1];  y = xt[:, 1:2];  t = xt[:, 2:3]
@@ -67,7 +66,7 @@ def pseudo_sequence(xt, dx):
     ], dim=1)
 
 # ================================================================
-# 6.  Transformer Block  (IDENTICAL)
+# 6.  Transformer Block 
 # ================================================================
 class TransformerBlock(nn.Module):
     def __init__(self, d_model=64, nhead=4):
@@ -90,8 +89,6 @@ class TransformerBlock(nn.Module):
 
 # ================================================================
 # 7.  Fourier Trans-PINN model
-#     CHANGED vs Wave: log_w_ic_v removed (no velocity IC)
-#                      3 loss weights instead of 4
 # ================================================================
 class FourierTransPINN(nn.Module):
     def __init__(self, d_model=64, nhead=4, n_blocks=2,
@@ -137,8 +134,6 @@ print(f"\nTotal parameters : {n_params:,}")
 
 # ================================================================
 # 9.  Domain
-#     CHANGED vs Wave: Nx=Ny=41, Nt=60
-#     (odeint is adaptive so Nt just sets evaluation points)
 # ================================================================
 Nx, Ny, Nt = 41, 41, 60
 x = torch.linspace(0, 1, Nx)
@@ -147,8 +142,7 @@ t = torch.linspace(0, 1, Nt)
 dx = x[1] - x[0]
 
 # ================================================================
-# 10.  Initial Conditions  (81x81)
-#      CHANGED vs Wave: amplitude 0.05, no velocity IC
+# 10.  Initial Conditions  
 # ================================================================
 x_ic_g = torch.linspace(0, 1, 81)
 y_ic_g = torch.linspace(0, 1, 81)
@@ -162,7 +156,7 @@ u_ic_true = 0.05 * torch.sin(pi * x_ic) * torch.sin(pi * y_ic_d)
 print(f"IC points : {ic.shape[0]:,}")
 
 # ================================================================
-# 11.  Boundary Conditions  (Nt_bc=120, identical structure)
+# 11.  Boundary Conditions  (Nt_bc=120)
 # ================================================================
 Nt_bc = 120
 t_bc  = torch.linspace(0, 1, Nt_bc).to(device)
@@ -185,7 +179,7 @@ bc = make_bc().to(device)
 print(f"BC points : {bc.shape[0]:,}")
 
 # ================================================================
-# 12.  Collocation helpers  (identical)
+# 12.  Collocation helpers  
 # ================================================================
 def new_res():
     return torch.rand(N_RES, 3, device=device).requires_grad_(True)
@@ -193,16 +187,7 @@ def new_res():
 res = new_res()
 
 # ================================================================
-# 13.  PDE Residual  — Allen-Cahn specific
-#
-#  CHANGED vs Wave:
-#  Wave:       3 grad calls (u_xx, u_yy, u_tt)
-#  Allen-Cahn: 2 grad calls (u_xx, u_yy) only
-#              u_t comes from first-order g1 (no second call)
-#              Nonlinear term u^3 - u uses forward-pass output
-#
-#  Allen-Cahn PDE:
-#    f = u_t - eps*(u_xx + u_yy) + u^3 - u = 0
+# 13.  PDE Residual  — Allen-Cahn 
 # ================================================================
 def pde_residual(model, pts):
     u   = model(pts, dx)                              # (N, 1)
@@ -231,11 +216,7 @@ def pde_residual(model, pts):
     return torch.mean(f ** 2)
 
 # ================================================================
-# 14.  Full PINN loss — 3 terms (no velocity IC)
-#
-#  CHANGED vs Wave:
-#  Wave:       4 terms (res, ic_disp, ic_vel, bc)
-#  Allen-Cahn: 3 terms (res, ic, bc)
+# 14.  Full PINN loss — 3 terms 
 # ================================================================
 def pinn_loss(model, res_pts):
     loss_res = pde_residual(model, res_pts)
@@ -256,8 +237,7 @@ def pinn_loss(model, res_pts):
     return total, loss_res, loss_ic, loss_bc
 
 # ================================================================
-# 15.  RAR Resampling  (finite-difference, no_grad — identical)
-#      CHANGED: FD residual uses Allen-Cahn formula
+# 15.  RAR Resampling 
 # ================================================================
 def rar_resample(model):
     model.eval()
@@ -297,7 +277,7 @@ def rar_resample(model):
     return combined.detach().requires_grad_(True)
 
 # ================================================================
-# 16.  Training  — 3-stage pipeline  (identical structure)
+# 16.  Training  — 3-stage pipeline
 # ================================================================
 loss_log = []
 
@@ -356,6 +336,8 @@ for step in tqdm(range(10000), desc="CosineAdam"):
 torch.cuda.empty_cache()
 
 # ---- Stage 3: L-BFGS  (2000 iters) ----------------------------
+# CHANGE: loss_log.append() added inside closure() so that
+#         Stage 3 L-BFGS loss is recorded and visible in the plot.
 print("\n" + "="*50)
 print("STAGE 3/3  L-BFGS polish  (2000 iters)")
 print("="*50)
@@ -372,6 +354,7 @@ def closure():
     loss, r, ic_, bc_ = pinn_loss(model, res_final)
     loss.backward()
     _n[0] += 1
+    loss_log.append(loss.item())   # ← ADDED: records every L-BFGS eval
     if _n[0] % 200 == 0:
         print(f"  L-BFGS {_n[0]:4d} | "
               f"total={loss.item():.3e}  res={r.item():.3e}")
@@ -382,9 +365,7 @@ print(f"  Done — {_n[0]} evals")
 torch.cuda.empty_cache()
 
 # ================================================================
-# 17.  FDM Ground Truth — Allen-Cahn via scipy.odeint
-#      CHANGED vs Wave: odeint (your original correct method)
-#      Resolution raised: Nx=Ny=41, Nt=60
+# 17.  FDM Ground Truth — Allen-Cahn 
 # ================================================================
 print("\nComputing FDM ground truth (odeint) ...")
 
@@ -417,7 +398,7 @@ utrue = utrue_flat.reshape(Nt, Nx, Ny)
 print("FDM done.")
 
 # ================================================================
-# 18.  Evaluation  (identical to Wave version)
+# 18.  Evaluation 
 # ================================================================
 upred = np.zeros_like(utrue)
 model.eval()
@@ -440,64 +421,112 @@ print(f"  Relative L1 Error : {l1:.6f}  ({l1*100:.4f}%)")
 print(f"{'='*45}")
 
 # ================================================================
-# 19.  Plots  (identical 4-plot system)
+# 19.  Plots
 # ================================================================
 xp, yp = np.meshgrid(xg, yg, indexing="ij")
 
-# A: Final-time 3D surface
+# ----------------------------------------------------------------
+# A: Final-time 3D surface 
+# ----------------------------------------------------------------
 fig = plt.figure(figsize=(18, 5))
-fig.suptitle(f"Fourier Trans-PINN | 2D Allen-Cahn | t={tg[-1]:.2f} | "
-             f"L2={l2:.2e}  L1={l1:.2e}", fontsize=13)
 for col, (data, title, cm) in enumerate([
-        (utrue[-1], "FDM Ground Truth", "viridis"),
-        (upred[-1], "Fourier Trans-PINN", "viridis"),
+        (utrue[-1], "FDM Ground Truth",    "viridis"),
+        (upred[-1], "Fourier Trans-PINN",  "viridis"),
         (np.abs(utrue[-1]-upred[-1]), "Absolute Error", "hot")]):
     ax = fig.add_subplot(1, 3, col+1, projection="3d")
     ax.plot_surface(xp, yp, data, cmap=cm)
-    ax.set_title(title);  ax.set_xlabel("x");  ax.set_ylabel("y")
+    ax.set_title(title)
+    ax.set_xlabel("x")
+    ax.set_ylabel("y")
+    ax.grid(False)
 plt.tight_layout()
-plt.savefig("snapshot_final.png", dpi=150);  plt.show()
+plt.savefig("snapshot_final.png", dpi=600)
+plt.show()
 print("Saved: snapshot_final.png")
 
-# B: Mid-time contour
+# ----------------------------------------------------------------
+# B: Mid-time contour 
+# ----------------------------------------------------------------
 mid = Nt // 2
 fig2, axes = plt.subplots(1, 3, figsize=(16, 4))
-fig2.suptitle(f"Mid-time  t={tg[mid]:.2f}", fontsize=12)
 for ax, (data, title, cm) in zip(axes, [
-        (utrue[mid], "FDM", "viridis"),
+        (utrue[mid], "FDM",               "viridis"),
         (upred[mid], "Fourier Trans-PINN", "viridis"),
         (np.abs(utrue[mid]-upred[mid]), "Abs Error", "hot")]):
     im = ax.contourf(xp, yp, data, 50, cmap=cm)
-    ax.set_title(title);  plt.colorbar(im, ax=ax)
+    ax.set_title(title)
+    ax.set_xlabel("x")
+    ax.set_ylabel("y")
+    ax.grid(False)
+    plt.colorbar(im, ax=ax)
 plt.tight_layout()
-plt.savefig("snapshot_mid.png", dpi=150);  plt.show()
+plt.savefig("snapshot_mid.png", dpi=600)
+plt.show()
 print("Saved: snapshot_mid.png")
 
-# C: L2 over time
+# ----------------------------------------------------------------
+# C: L2 over time 
+# ----------------------------------------------------------------
 l2_t = [np.sqrt(np.sum((utrue[i]-upred[i])**2)
                 / (np.sum(utrue[i]**2)+1e-12)) for i in range(Nt)]
 plt.figure(figsize=(8, 4))
 plt.semilogy(tg, l2_t, lw=1.8, color="steelblue")
-plt.xlabel("time t");  plt.ylabel("relative L2 error")
+plt.xlabel("time t")
+plt.ylabel("relative L2 error")
 plt.title("Fourier Trans-PINN — Allen-Cahn error over time")
-plt.grid(True, which="both", ls="--", alpha=0.5)
+plt.grid(False)
 plt.tight_layout()
-plt.savefig("l2_over_time.png", dpi=150);  plt.show()
+plt.savefig("l2_over_time.png", dpi=600)
+plt.show()
 print("Saved: l2_over_time.png")
 
-# D: Loss curve
+# ----------------------------------------------------------------
+# D: Loss curve — full 3-stage
+# ----------------------------------------------------------------
 plt.figure(figsize=(8, 4))
 plt.semilogy(loss_log, lw=1.2, color="darkorange")
-plt.xlabel("step");  plt.ylabel("total loss")
+plt.axvline(2000,  color='gray', ls='--', lw=1, label="Stage 1 end")
+plt.axvline(12000, color='gray', ls=':',  lw=1, label="Stage 2 end")
+plt.xlabel("step")
+plt.ylabel("total loss")
 plt.title("Fourier Trans-PINN — Allen-Cahn training loss")
-plt.grid(True, which="both", ls="--", alpha=0.5)
+plt.legend(fontsize=9)
+plt.grid(False)
 plt.tight_layout()
-plt.savefig("loss_curve.png", dpi=150);  plt.show()
+plt.savefig("loss_curve.png", dpi=600)
+plt.show()
 print("Saved: loss_curve.png")
 
+# ----------------------------------------------------------------
+# E: FDM vs Fourier Trans-PINN solution slices
+# ----------------------------------------------------------------
+y_mid_idx = Ny // 2   # index closest to y = 0.5
+
+fig3, axes3 = plt.subplots(1, 4, figsize=(18, 4))
+fig3.suptitle("Solution slices at fixed times", fontsize=12)
+
+for ax, frac in zip(axes3, [0.25, 0.50, 0.75, 1.00]):
+    idx = int(frac * (Nt - 1))
+    u_fdm  = utrue[idx, :, y_mid_idx]
+    u_pinn = upred[idx, :, y_mid_idx]
+    ax.plot(xg, u_fdm,  'k-',  lw=2,   label="FDM")
+    ax.plot(xg, u_pinn, 'r--', lw=1.5, label="Fourier Trans-PINN")
+    ax.set_title(f"t = {tg[idx]:.2f}")
+    ax.set_xlabel("x")
+    ax.set_ylabel("u")
+    ax.legend(fontsize=8, loc="lower left")
+    ax.grid(False)
+
+plt.tight_layout()
+plt.savefig("solution_slices.png", dpi=600)
+plt.show()
+print("Saved: solution_slices.png")
+
+# ----------------------------------------------------------------
 # Final weight summary
+# ----------------------------------------------------------------
 print("\nFinal learnable loss weights:")
 print(f"  w_res = {torch.exp(model.log_w_res).item():.4f}")
 print(f"  w_ic  = {torch.exp(model.log_w_ic ).item():.4f}")
 print(f"  w_bc  = {torch.exp(model.log_w_bc ).item():.4f}")
-print("\nAll done.") 
+print("\nAll done.")
