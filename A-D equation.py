@@ -1,72 +1,3 @@
-# ================================================================
-#  Fourier Trans-PINN  |  1D Advection-Diffusion  |  Colab T4
-#
-#  PDE:  u_t + c*u_x - nu*u_xx = 0
-#        on x in [0,1], t in [0,1]
-#        c = 0.1  (advection speed)
-#        nu = 0.05 (diffusion coefficient)
-#        Pe = c/nu = 2.0
-#  IC:   u(x,0) = sin(pi*x)
-#  BC:   u(0,t) = 0,  u(1,t) = 0  (Dirichlet)
-#
-#  INSTRUCTIONS:
-#  1. Runtime -> Restart Runtime
-#  2. Paste entire code into ONE fresh cell
-#  3. Run
-#
-#  ============================================================
-#  WHAT IS IDENTICAL TO Fourier Trans-PINN (Burgers):
-#  ============================================================
-#  - FourierEmbedding  (in_dim=2, n_freq=32, sigma=5.0)
-#  - pseudo_sequence   (3 tokens, 2-dim: x-dx, x, x+dx)
-#  - TransformerBlock  (GELU, pre-norm, d_model=64, nhead=4)
-#  - 2 stacked transformer blocks
-#  - MLP decoder       (64->256->256->128->1, Tanh)
-#  - Learnable log loss-weights (3 terms: res, ic, bc)
-#  - RAR via finite-difference under no_grad, every 2000 steps
-#  - 3-stage training: OneCycleLR -> CosineAdam+RAR -> L-BFGS
-#  - Gradient clipping norm=1.0
-#  - Checkpoint saving + restore before L-BFGS
-#  - FDM: odeint (your original method)
-#  - Plots: imshow space-time heatmaps + slices
-#
-#  ============================================================
-#  WHAT CHANGED vs Fourier Trans-PINN (Burgers):
-#  ============================================================
-#  1. PDE residual:
-#       Burgers: f = u_t + u*u_x - nu*u_xx  (nonlinear)
-#       AD:      f = u_t + c*u_x - nu*u_xx  (LINEAR)
-#       c=0.1 is a fixed constant, not the solution u
-#       Only 1 second-deriv call — identical structure to Burgers
-#
-#  2. Domain: x in [0,1]  (not [-1,1] like Burgers)
-#       No x-shift needed in collocation sampling
-#       BC walls at x=0 and x=1 (not x=-1 and x=1)
-#
-#  3. IC: u(x,0) = +sin(pi*x)  (positive, not -sin like Burgers)
-#
-#  4. N_RES: 3000 -> 2000
-#       AD is LINEAR with smooth solution (Pe=2, no shock)
-#       3000 was needed for Burgers shock layer
-#       2000 is sufficient for smooth AD solution
-#
-#  5. RAR FD residual uses c*u_x (constant) not u0*u_x
-#
-#  6. FDM: rhs = -c*u_x + nu*u_xx  (your original correct form)
-#       nt=120 (your original value)
-#
-#  7. c=0.1, nu=0.05 constants added (no eps, no shock nu)
-#
-#  ============================================================
-#  KEY OBSERVATION about your Trans-PINN result:
-#  ============================================================
-#  Your Trans-PINN got L1=8.32e-4, L2=9.40e-4 — already good.
-#  But training took 1h43m because you used a 256x120=30720
-#  grid-based res with create_graph=True held for all points.
-#  This code uses N_RES=2000 random points — much faster and
-#  more accurate through the 3-stage pipeline + RAR.
-# ================================================================
-
 import os
 os.environ["PYTORCH_ALLOC_CONF"] = "expandable_segments:True"
 
@@ -97,7 +28,6 @@ print(f"VRAM free  : {free:.2f} GB")
 
 # ================================================================
 # 2.  Advection-Diffusion parameters
-#     CHANGED vs Burgers: c and nu constants (not shock nu)
 # ================================================================
 c  = 0.1
 nu = 0.05
@@ -108,14 +38,13 @@ print(f"Pe         : {c/nu:.1f}")
 
 # ================================================================
 # 3.  Memory budget
-#     CHANGED vs Burgers: N_RES=2000 (smooth linear PDE, no shock)
 # ================================================================
 N_RES       = 2000    # 3000 was for Burgers shock; AD is smooth
 N_RAR_PROBE = 6000
 N_RAR_KEEP  = 1200
 
 # ================================================================
-# 4.  Fourier Embedding  (in_dim=2, identical to Burgers)
+# 4.  Fourier Embedding 
 # ================================================================
 class FourierEmbedding(nn.Module):
     def __init__(self, in_dim=2, n_freq=32, sigma=5.0):
@@ -130,7 +59,7 @@ class FourierEmbedding(nn.Module):
                           torch.cos(proj)], dim=-1)
 
 # ================================================================
-# 5.  Pseudo-sequence  (identical to Burgers, 2-dim tokens)
+# 5.  Pseudo-sequence 
 # ================================================================
 def pseudo_sequence(xt, dx):
     x = xt[:, 0:1]
@@ -142,7 +71,7 @@ def pseudo_sequence(xt, dx):
     ], dim=1)                              # [N, 3, 2]
 
 # ================================================================
-# 6.  Transformer Block  (identical)
+# 6.  Transformer Block  
 # ================================================================
 class TransformerBlock(nn.Module):
     def __init__(self, d_model=64, nhead=4):
@@ -164,7 +93,7 @@ class TransformerBlock(nn.Module):
         return x
 
 # ================================================================
-# 7.  Fourier Trans-PINN model  (identical to Burgers)
+# 7.  Fourier Trans-PINN model
 # ================================================================
 class FourierTransPINN(nn.Module):
     def __init__(self, d_model=64, nhead=4, n_blocks=2,
@@ -213,7 +142,6 @@ best_state = copy.deepcopy(model.state_dict())
 
 # ================================================================
 # 9.  Domain
-#     CHANGED vs Burgers: x in [0,1] (not [-1,1])
 # ================================================================
 Nx, Nt = 256, 120
 x  = torch.linspace(0, 1, Nx)
@@ -222,7 +150,6 @@ dx = x[1] - x[0]
 
 # ================================================================
 # 10.  Initial Condition
-#      CHANGED vs Burgers: +sin(pi*x) on [0,1]  (not -sin on [-1,1])
 # ================================================================
 x_ic      = torch.linspace(0, 1, 512).reshape(-1, 1).to(device)
 t_ic      = torch.zeros_like(x_ic)
@@ -232,7 +159,6 @@ print(f"IC points : {ic.shape[0]:,}")
 
 # ================================================================
 # 11.  Boundary Conditions
-#      CHANGED vs Burgers: x=0 and x=1  (not x=-1 and x=1)
 # ================================================================
 Nt_bc = 300
 t_bc  = torch.linspace(0, 1, Nt_bc).reshape(-1, 1).to(device)
@@ -244,7 +170,6 @@ print(f"BC points : {bc_l.shape[0] + bc_r.shape[0]:,}  (left + right)")
 
 # ================================================================
 # 12.  Collocation helpers
-#      CHANGED vs Burgers: x in [0,1] — no shift needed
 # ================================================================
 def new_res():
     r = torch.rand(N_RES, 2, device=device)
@@ -255,12 +180,6 @@ res = new_res()
 
 # ================================================================
 # 13.  PDE Residual — Advection-Diffusion
-#
-#  CHANGED vs Burgers:
-#    Burgers: f = u_t + u*u_x - nu*u_xx   (u*u_x nonlinear)
-#    AD:      f = u_t + c*u_x - nu*u_xx   (c*u_x LINEAR)
-#    c=0.1 is a fixed constant — no product with u
-#    Identical grad call structure: 1 first call + 1 second call
 # ================================================================
 def pde_residual(model, pts):
     u    = model(pts, dx)
@@ -276,7 +195,7 @@ def pde_residual(model, pts):
     return torch.mean(f ** 2)
 
 # ================================================================
-# 14.  Full PINN loss — 3 terms  (identical structure to Burgers)
+# 14.  Full PINN loss — 3 terms 
 # ================================================================
 def pinn_loss(model, res_pts):
     loss_res = pde_residual(model, res_pts)
@@ -295,10 +214,7 @@ def pinn_loss(model, res_pts):
     return total, loss_res, loss_ic, loss_bc
 
 # ================================================================
-# 15.  RAR Resampling  (1D FD, no_grad)
-#      CHANGED vs Burgers:
-#        - probes in [0,1] (not [-1,1])
-#        - AD residual: u_t + c*u_x - nu*u_xx  (c constant)
+# 15.  RAR Resampling  
 # ================================================================
 def rar_resample(model):
     model.eval()
@@ -343,7 +259,7 @@ def rar_resample(model):
     return combined.detach().requires_grad_(True)
 
 # ================================================================
-# 16.  Training — 3-stage pipeline  (identical to Burgers)
+# 16.  Training — 3-stage
 # ================================================================
 loss_log = []
 
@@ -418,6 +334,8 @@ model.load_state_dict(best_state)
 print("  Done.")
 
 # ---- Stage 3: L-BFGS  (2000 iters) ----------------------------
+# CHANGE: loss_log.append() added inside closure() so that
+#         Stage 3 L-BFGS loss is recorded and visible in the plot.
 print("\n" + "="*50)
 print("STAGE 3/3  L-BFGS polish  (2000 iters)")
 print("="*50)
@@ -434,6 +352,7 @@ def closure():
     loss, r, ic_, bc_ = pinn_loss(model, res_final)
     loss.backward()
     _n[0] += 1
+    loss_log.append(loss.item())   # ← ADDED: records every L-BFGS eval
     if _n[0] % 200 == 0:
         print(f"  L-BFGS {_n[0]:4d} | "
               f"total={loss.item():.3e}  res={r.item():.3e}")
@@ -444,10 +363,7 @@ print(f"  Done — {_n[0]} evals")
 torch.cuda.empty_cache()
 
 # ================================================================
-# 17.  FDM Ground Truth — AD via scipy.odeint
-#      CHANGED vs Burgers: rhs = -c*u_x + nu*u_xx
-#                          nt=120 (your original value)
-#                          domain [0,1]
+# 17.  FDM Ground Truth 
 # ================================================================
 print("\nComputing FDM ground truth (odeint) ...")
 
@@ -473,7 +389,7 @@ xg, tg, utrue = get_fdm_truth(c, nu)
 print("FDM done.")
 
 # ================================================================
-# 18.  Evaluation  (identical structure to Burgers)
+# 18.  Evaluation
 # ================================================================
 upred = np.zeros_like(utrue)
 model.eval()
@@ -494,40 +410,42 @@ print(f"  Relative L1 Error : {l1:.6f}  ({l1*100:.4f}%)")
 print(f"{'='*45}")
 
 # ================================================================
-# 19.  Plots  (identical 4-plot system)
+# 19.  Plots
 # ================================================================
 
-# A: Space-time heatmaps
+# A: Space-time heatmaps  — NO suptitle, NO grid
 fig, axes = plt.subplots(1, 3, figsize=(16, 5))
-fig.suptitle(
-    f"Fourier Trans-PINN | 1D Advection-Diffusion | "
-    f"c={c}, nu={nu}, Pe={c/nu:.1f} | "
-    f"L2={l2:.2e}  L1={l1:.2e}", fontsize=12)
 
-kw = dict(aspect='auto', extent=[0,1,0,1],
+kw = dict(aspect='auto', extent=[0, 1, 0, 1],
           origin='lower', cmap='RdBu_r')
+
 im0 = axes[0].imshow(utrue.T, **kw)
 axes[0].set_title("FDM Ground Truth")
-axes[0].set_xlabel("t");  axes[0].set_ylabel("x")
+axes[0].set_xlabel("t")
+axes[0].set_ylabel("x")
+axes[0].grid(False)
 plt.colorbar(im0, ax=axes[0])
 
 im1 = axes[1].imshow(upred.T, **kw)
 axes[1].set_title("Fourier Trans-PINN")
 axes[1].set_xlabel("t")
+axes[1].grid(False)
 plt.colorbar(im1, ax=axes[1])
 
-im2 = axes[2].imshow(np.abs(utrue-upred).T,
-                     aspect='auto', extent=[0,1,0,1],
+im2 = axes[2].imshow(np.abs(utrue - upred).T,
+                     aspect='auto', extent=[0, 1, 0, 1],
                      origin='lower', cmap='Reds')
 axes[2].set_title("Absolute Error")
 axes[2].set_xlabel("t")
+axes[2].grid(False)
 plt.colorbar(im2, ax=axes[2], label="|Error|")
 
 plt.tight_layout()
-plt.savefig("heatmap_spacetime.png", dpi=150);  plt.show()
+plt.savefig("heatmap_spacetime.png", dpi=600)
+plt.show()
 print("Saved: heatmap_spacetime.png")
 
-# B: Solution slices at t=0.25, 0.50, 0.75, 1.0
+# B: Solution slices at t=0.25, 0.50, 0.75, 1.0  
 fig2, axes2 = plt.subplots(1, 4, figsize=(18, 4))
 fig2.suptitle("Solution slices at fixed times", fontsize=12)
 for ax, frac in zip(axes2, [0.25, 0.50, 0.75, 1.0]):
@@ -535,35 +453,42 @@ for ax, frac in zip(axes2, [0.25, 0.50, 0.75, 1.0]):
     ax.plot(xg, utrue[idx], 'k-',  lw=2,   label="FDM")
     ax.plot(xg, upred[idx], 'r--', lw=1.5, label="Fourier Trans-PINN")
     ax.set_title(f"t = {tg[idx]:.2f}")
-    ax.set_xlabel("x");  ax.set_ylabel("u")
-    ax.legend(fontsize=8);  ax.grid(True, alpha=0.3)
+    ax.set_xlabel("x")
+    ax.set_ylabel("u")
+    ax.legend(fontsize=8)
+    ax.grid(False)
 plt.tight_layout()
-plt.savefig("solution_slices.png", dpi=150);  plt.show()
+plt.savefig("solution_slices.png", dpi=600)
+plt.show()
 print("Saved: solution_slices.png")
 
-# C: L2 error over time
-l2_t = [np.sqrt(np.sum((utrue[i]-upred[i])**2)
-                / (np.sum(utrue[i]**2)+1e-12)) for i in range(len(tg))]
+# C: L2 error over time 
+l2_t = [np.sqrt(np.sum((utrue[i] - upred[i])**2)
+                / (np.sum(utrue[i]**2) + 1e-12)) for i in range(len(tg))]
 plt.figure(figsize=(8, 4))
 plt.semilogy(tg, l2_t, lw=1.8, color="steelblue")
-plt.xlabel("time t");  plt.ylabel("relative L2 error")
+plt.xlabel("time t")
+plt.ylabel("relative L2 error")
 plt.title("Fourier Trans-PINN — Advection-Diffusion error over time")
-plt.grid(True, which="both", ls="--", alpha=0.5)
+plt.grid(False)
 plt.tight_layout()
-plt.savefig("l2_over_time.png", dpi=150);  plt.show()
+plt.savefig("l2_over_time.png", dpi=600)
+plt.show()
 print("Saved: l2_over_time.png")
 
-# D: Training loss curve
+# D: Training loss curve — full 3-stage
 plt.figure(figsize=(8, 4))
 plt.semilogy(loss_log, lw=1.2, color="darkorange")
 plt.axvline(2000,  color='gray', ls='--', lw=1, label="Stage 1 end")
 plt.axvline(12000, color='gray', ls=':',  lw=1, label="Stage 2 end")
-plt.xlabel("step");  plt.ylabel("total loss")
+plt.xlabel("step")
+plt.ylabel("total loss")
 plt.title("Fourier Trans-PINN — Advection-Diffusion training loss")
 plt.legend(fontsize=9)
-plt.grid(True, which="both", ls="--", alpha=0.5)
+plt.grid(False)
 plt.tight_layout()
-plt.savefig("loss_curve.png", dpi=150);  plt.show()
+plt.savefig("loss_curve.png", dpi=600)
+plt.show()
 print("Saved: loss_curve.png")
 
 # Final summary
