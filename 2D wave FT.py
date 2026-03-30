@@ -80,7 +80,7 @@ class TransformerBlock(nn.Module):
         return x
  
 # ================================================================
-# 6.  Trans-PINN v6
+# 6.  Trans-PINN
 # ================================================================
 class TransPINN(nn.Module):
     def __init__(self, d_model=64, nhead=4, n_blocks=2,
@@ -177,7 +177,7 @@ def new_res():
 res = new_res()
  
 # ================================================================
-# 12.  PDE residual  (3 correct separate grad calls)
+# 12.  PDE residual
 # ================================================================
 def pde_residual(model, pts):
     u    = model(pts, dx)
@@ -222,18 +222,6 @@ def pinn_loss(model, res_pts):
  
 # ================================================================
 # 14.  RAR Resampling
-#
-#  FIX vs v5:
-#  Do NOT use autograd inside RAR at all.
-#  Use finite-difference approximation of PDE residual instead.
-#  This runs entirely under torch.no_grad() → zero graph memory
-#  and zero RuntimeError risk.
-#
-#  FD residual approximation:
-#    u_tt ≈ [u(x,y,t+h) - 2u(x,y,t) + u(x,y,t-h)] / h^2
-#    u_xx ≈ [u(x+h,y,t) - 2u(x,y,t) + u(x-h,y,t)] / h^2
-#    u_yy ≈ [u(x,y+h,t) - 2u(x,y,t) + u(x,y-h,t)] / h^2
-#  This is a cheap, accurate residual proxy for point selection.
 # ================================================================
 def rar_resample(model):
     model.eval()
@@ -333,6 +321,8 @@ for step in tqdm(range(10000), desc="CosineAdam"):
 torch.cuda.empty_cache()
  
 # ---- Stage 3: L-BFGS  (2000 iters) ----------------------------
+# CHANGE: loss_log.append() added inside closure() so that
+#         Stage 3 L-BFGS loss is recorded and visible in the plot.
 print("\n" + "="*50)
 print("STAGE 3/3  L-BFGS polish  (2000 iters)")
 print("="*50)
@@ -349,6 +339,7 @@ def closure():
     loss, r, id_, iv, bc_ = pinn_loss(model, res_final)
     loss.backward()
     _n[0] += 1
+    loss_log.append(loss.item())   # ← ADDED: records every L-BFGS eval
     if _n[0] % 200 == 0:
         print(f"  L-BFGS {_n[0]:4d} | "
               f"total={loss.item():.3e}  res={r.item():.3e}")
@@ -416,50 +407,107 @@ print(f"{'='*45}")
 # 18.  Plots
 # ================================================================
 xp, yp = np.meshgrid(xg, yg, indexing="ij")
- 
+
+# ----------------------------------------------------------------
+# A: Final-time 3D surface  
+# ----------------------------------------------------------------
 fig = plt.figure(figsize=(18, 5))
-fig.suptitle(f"Trans-PINN v6 | t={tg[-1]:.2f} | "
-             f"L2={l2:.2e}  L1={l1:.2e}", fontsize=13)
 for col, (data, title, cm) in enumerate([
         (utrue[-1], "FDM Ground Truth", "viridis"),
-        (upred[-1], "Trans-PINN v6",    "viridis"),
+        (upred[-1], "Fourier Trans-PINN",    "viridis"),
         (np.abs(utrue[-1]-upred[-1]),   "Absolute Error", "hot")]):
     ax = fig.add_subplot(1, 3, col+1, projection="3d")
     ax.plot_surface(xp, yp, data, cmap=cm)
-    ax.set_title(title);  ax.set_xlabel("x");  ax.set_ylabel("y")
+    ax.set_title(title)
+    ax.set_xlabel("x")
+    ax.set_ylabel("y")
+    ax.grid(False)
 plt.tight_layout()
-plt.savefig("snapshot_final.png", dpi=150);  plt.show()
- 
+plt.savefig("snapshot_final.png", dpi=600)
+plt.show()
+print("Saved: snapshot_final.png")
+
+# ----------------------------------------------------------------
+# B: Mid-time contour  
+# ----------------------------------------------------------------
 mid = Nt // 2
 fig2, axes = plt.subplots(1, 3, figsize=(16, 4))
-fig2.suptitle(f"Mid-time  t={tg[mid]:.2f}", fontsize=12)
 for ax, (data, title, cm) in zip(axes, [
         (utrue[mid], "FDM",           "viridis"),
         (upred[mid], "Trans-PINN v6", "viridis"),
         (np.abs(utrue[mid]-upred[mid]), "Abs Error", "hot")]):
     im = ax.contourf(xp, yp, data, 50, cmap=cm)
-    ax.set_title(title);  plt.colorbar(im, ax=ax)
+    ax.set_title(title)
+    ax.set_xlabel("x")
+    ax.set_ylabel("y")
+    ax.grid(False)
+    plt.colorbar(im, ax=ax)
 plt.tight_layout()
-plt.savefig("snapshot_mid.png", dpi=150);  plt.show()
- 
+plt.savefig("snapshot_mid.png", dpi=600)
+plt.show()
+print("Saved: snapshot_mid.png")
+
+# ----------------------------------------------------------------
+# C: L2 error over time  
+# ----------------------------------------------------------------
 l2_t = [np.sqrt(np.sum((utrue[i]-upred[i])**2)
                 / (np.sum(utrue[i]**2)+1e-12)) for i in range(Nt)]
 plt.figure(figsize=(8, 4))
 plt.semilogy(tg, l2_t, lw=1.8, color="steelblue")
-plt.xlabel("time t");  plt.ylabel("relative L2 error")
+plt.xlabel("time t")
+plt.ylabel("relative L2 error")
 plt.title("Trans-PINN v6 — error over time")
-plt.grid(True, which="both", ls="--", alpha=0.5)
+plt.grid(False)
 plt.tight_layout()
-plt.savefig("l2_over_time.png", dpi=150);  plt.show()
- 
+plt.savefig("l2_over_time.png", dpi=600)
+plt.show()
+print("Saved: l2_over_time.png")
+
+# ----------------------------------------------------------------
+# D: Training loss curve — full 3-stage 
+# ----------------------------------------------------------------
 plt.figure(figsize=(8, 4))
 plt.semilogy(loss_log, lw=1.2, color="darkorange")
-plt.xlabel("step");  plt.ylabel("total loss")
-plt.title("Trans-PINN v6 — training loss")
-plt.grid(True, which="both", ls="--", alpha=0.5)
+plt.axvline(2000,  color='gray', ls='--', lw=1, label="Stage 1 end")
+plt.axvline(12000, color='gray', ls=':',  lw=1, label="Stage 2 end")
+plt.xlabel("step")
+plt.ylabel("total loss")
+plt.title("Fourier Trans-PINN — Wave training loss")
+plt.legend(fontsize=9)
+plt.grid(False)
 plt.tight_layout()
-plt.savefig("loss_curve.png", dpi=150);  plt.show()
- 
+plt.savefig("loss_curve.png", dpi=600)
+plt.show()
+print("Saved: loss_curve.png")
+
+# ----------------------------------------------------------------
+# E: FDM vs Trans-PINN solution slices
+# ----------------------------------------------------------------
+y_mid_idx = Ny // 2   # index closest to y = 0.5
+
+fig3, axes3 = plt.subplots(1, 4, figsize=(18, 4))
+fig3.suptitle("Solution slices at fixed times", fontsize=12)
+
+for ax, frac in zip(axes3, [0.25, 0.50, 0.75, 1.00]):
+    idx = int(frac * (Nt - 1))
+    u_fdm_slice  = utrue[idx, :, y_mid_idx]
+    u_pinn_slice = upred[idx, :, y_mid_idx]
+    ax.plot(xg, u_fdm_slice,  'k-',  lw=2,   label="FDM")
+    ax.plot(xg, u_pinn_slice, 'r--', lw=1.5, label="Fourier Trans-PINN")
+    ax.set_title(f"t = {tg[idx]:.2f}")
+    ax.set_xlabel("x")
+    ax.set_ylabel("u")
+    ax.legend(fontsize=8, loc="lower left")
+    ax.grid(False)
+
+plt.tight_layout()
+plt.savefig("fdm_vs_pinn_slices.png", dpi=600)
+plt.show()
+print("Saved: fdm_vs_pinn_slices.png")
+
+# ----------------------------------------------------------------
+# Final summary
+# ----------------------------------------------------------------
 print("\nFinal learnable loss weights:")
 print(f"  w_res  = {torch.exp(model.log_w_res ).item():.4f}")
 print(f"  w_ic_d = {torch.exp(model.log_w_ic_d).item():.4f}")
