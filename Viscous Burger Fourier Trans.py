@@ -1,4 +1,3 @@
-
 import os
 os.environ["PYTORCH_ALLOC_CONF"] = "expandable_segments:True"
 
@@ -36,7 +35,6 @@ print(f"nu         : {nu:.6f}")
 
 # ================================================================
 # 3.  Memory budget
-#     R2: N_RES 2000 -> 3000
 # ================================================================
 N_RES       = 3000    # R2: was 2000
 N_RAR_PROBE = 6000
@@ -44,7 +42,6 @@ N_RAR_KEEP  = 1200
 
 # ================================================================
 # 4.  Fourier Embedding
-#     in_dim=2 for Burgers (x,t)
 # ================================================================
 class FourierEmbedding(nn.Module):
     def __init__(self, in_dim=2, n_freq=32, sigma=5.0):
@@ -59,7 +56,7 @@ class FourierEmbedding(nn.Module):
                           torch.cos(proj)], dim=-1)
 
 # ================================================================
-# 5.  Pseudo-sequence  (2-dim tokens: (x,t))
+# 5.  Pseudo-sequence  
 # ================================================================
 def pseudo_sequence(xt, dx):
     x = xt[:, 0:1]
@@ -71,7 +68,7 @@ def pseudo_sequence(xt, dx):
     ], dim=1)                              # [N, 3, 2]
 
 # ================================================================
-# 6.  Transformer Block  (identical to Wave/Allen-Cahn)
+# 6.  Transformer Block  
 # ================================================================
 class TransformerBlock(nn.Module):
     def __init__(self, d_model=64, nhead=4):
@@ -131,7 +128,7 @@ class FourierTransPINN(nn.Module):
         return self.mlp(h[:, 1, :])        # centre token [N,1]
 
 # ================================================================
-# 8.  Build model + checkpoint trackers  (R1)
+# 8.  Build model + checkpoint trackers
 # ================================================================
 model = FourierTransPINN().to(device)
 n_params = sum(p.numel() for p in model.parameters())
@@ -150,7 +147,7 @@ t  = torch.linspace( 0, 1, Nt)
 dx = x[1] - x[0]
 
 # ================================================================
-# 10.  Initial Condition  (512 pts, 1D)
+# 10.  Initial Condition  (512 pts)
 # ================================================================
 x_ic      = torch.linspace(-1, 1, 512).reshape(-1, 1).to(device)
 t_ic      = torch.zeros_like(x_ic)
@@ -159,7 +156,7 @@ u_ic_true = -torch.sin(pi * x_ic)
 print(f"IC points : {ic.shape[0]:,}")
 
 # ================================================================
-# 11.  Boundary Conditions  (2 walls, Nt_bc=300)
+# 11.  Boundary Conditions  (Nt_bc=300)
 # ================================================================
 Nt_bc = 300
 t_bc  = torch.linspace(0, 1, Nt_bc).reshape(-1, 1).to(device)
@@ -170,7 +167,7 @@ bc_r  = torch.cat([x_r, t_bc], dim=1).to(device)
 print(f"BC points : {bc_l.shape[0] + bc_r.shape[0]:,}  (left + right)")
 
 # ================================================================
-# 12.  Collocation helpers
+# 12.  Collocation 
 # ================================================================
 def new_res():
     r = torch.rand(N_RES, 2, device=device)
@@ -180,9 +177,7 @@ def new_res():
 res = new_res()
 
 # ================================================================
-# 13.  PDE Residual — Burgers
-#      f = u_t + u*u_x - nu*u_xx = 0
-#      Only 1 second-deriv call needed
+# 13.  PDE Residual 
 # ================================================================
 def pde_residual(model, pts):
     u    = model(pts, dx)
@@ -197,7 +192,7 @@ def pde_residual(model, pts):
     return torch.mean(f ** 2)
 
 # ================================================================
-# 14.  Full PINN loss — 3 terms
+# 14.  Full PINN loss 
 # ================================================================
 def pinn_loss(model, res_pts):
     loss_res = pde_residual(model, res_pts)
@@ -216,7 +211,7 @@ def pinn_loss(model, res_pts):
     return total, loss_res, loss_ic, loss_bc
 
 # ================================================================
-# 15.  RAR Resampling  (1D finite-difference, no_grad)
+# 15.  RAR Resampling 
 # ================================================================
 def rar_resample(model):
     model.eval()
@@ -260,7 +255,7 @@ def rar_resample(model):
     return combined.detach().requires_grad_(True)
 
 # ================================================================
-# 16.  Training — 3-stage pipeline
+# 16.  Training — 3-stage 
 # ================================================================
 loss_log = []
 
@@ -356,6 +351,7 @@ def closure():
     loss, r, ic_, bc_ = pinn_loss(model, res_final)
     loss.backward()
     _n[0] += 1
+    loss_log.append(loss.item())   # ← ADDED: records every L-BFGS eval
     if _n[0] % 200 == 0:
         print(f"  L-BFGS {_n[0]:4d} | "
               f"total={loss.item():.3e}  res={r.item():.3e}")
@@ -415,36 +411,43 @@ print(f"{'='*45}")
 # 19.  Plots
 # ================================================================
 
-# A: Space-time heatmaps
+# ----------------------------------------------------------------
+# A: Space-time heatmaps 
+# ----------------------------------------------------------------
 fig, axes = plt.subplots(1, 3, figsize=(16, 5))
-fig.suptitle(
-    f"Fourier Trans-PINN | 1D Burgers  nu={nu:.4f} | "
-    f"L2={l2:.2e}  L1={l1:.2e}", fontsize=13)
 
-kw = dict(aspect='auto', extent=[0,1,-1,1],
+kw = dict(aspect='auto', extent=[0, 1, -1, 1],
           origin='lower', cmap='RdBu_r')
+
 im0 = axes[0].imshow(utrue.T, **kw)
 axes[0].set_title("FDM Ground Truth")
-axes[0].set_xlabel("t");  axes[0].set_ylabel("x")
+axes[0].set_xlabel("t")
+axes[0].set_ylabel("x")
+axes[0].grid(False)
 plt.colorbar(im0, ax=axes[0])
 
 im1 = axes[1].imshow(upred.T, **kw)
 axes[1].set_title("Fourier Trans-PINN")
 axes[1].set_xlabel("t")
+axes[1].grid(False)
 plt.colorbar(im1, ax=axes[1])
 
-im2 = axes[2].imshow(np.abs(utrue-upred).T,
-                     aspect='auto', extent=[0,1,-1,1],
+im2 = axes[2].imshow(np.abs(utrue - upred).T,
+                     aspect='auto', extent=[0, 1, -1, 1],
                      origin='lower', cmap='Reds')
 axes[2].set_title("Absolute Error")
 axes[2].set_xlabel("t")
+axes[2].grid(False)
 plt.colorbar(im2, ax=axes[2], label="|Error|")
 
 plt.tight_layout()
-plt.savefig("heatmap_spacetime.png", dpi=150);  plt.show()
+plt.savefig("heatmap_spacetime.png", dpi=600)
+plt.show()
 print("Saved: heatmap_spacetime.png")
 
-# B: Solution slices at t=0.25, 0.50, 0.75, 1.0
+# ----------------------------------------------------------------
+# B: Solution slices 
+# ----------------------------------------------------------------
 fig2, axes2 = plt.subplots(1, 4, figsize=(18, 4))
 fig2.suptitle("Solution slices at fixed times", fontsize=12)
 for ax, frac in zip(axes2, [0.25, 0.50, 0.75, 1.0]):
@@ -452,38 +455,72 @@ for ax, frac in zip(axes2, [0.25, 0.50, 0.75, 1.0]):
     ax.plot(xg, utrue[idx], 'k-',  lw=2,   label="FDM")
     ax.plot(xg, upred[idx], 'r--', lw=1.5, label="Fourier Trans-PINN")
     ax.set_title(f"t = {tg[idx]:.2f}")
-    ax.set_xlabel("x");  ax.set_ylabel("u")
-    ax.legend(fontsize=8);  ax.grid(True, alpha=0.3)
+    ax.set_xlabel("x")
+    ax.set_ylabel("u")
+    ax.legend(fontsize=8)
+    ax.grid(False)
 plt.tight_layout()
-plt.savefig("solution_slices.png", dpi=150);  plt.show()
+plt.savefig("solution_slices.png", dpi=600)
+plt.show()
 print("Saved: solution_slices.png")
 
+# ----------------------------------------------------------------
 # C: L2 error over time
-l2_t = [np.sqrt(np.sum((utrue[i]-upred[i])**2)
-                / (np.sum(utrue[i]**2)+1e-12)) for i in range(len(tg))]
+# ----------------------------------------------------------------
+l2_t = [np.sqrt(np.sum((utrue[i] - upred[i])**2)
+                / (np.sum(utrue[i]**2) + 1e-12)) for i in range(len(tg))]
 plt.figure(figsize=(8, 4))
 plt.semilogy(tg, l2_t, lw=1.8, color="steelblue")
-plt.xlabel("time t");  plt.ylabel("relative L2 error")
+plt.xlabel("time t")
+plt.ylabel("relative L2 error")
 plt.title("Fourier Trans-PINN — Burgers error over time")
-plt.grid(True, which="both", ls="--", alpha=0.5)
+plt.grid(False)
 plt.tight_layout()
-plt.savefig("l2_over_time.png", dpi=150);  plt.show()
+plt.savefig("l2_over_time.png", dpi=600)
+plt.show()
 print("Saved: l2_over_time.png")
 
-# D: Training loss curve
+# ----------------------------------------------------------------
+# D: Training loss curve — full 3-stage 
+# ----------------------------------------------------------------
 plt.figure(figsize=(8, 4))
 plt.semilogy(loss_log, lw=1.2, color="darkorange")
 plt.axvline(2000,  color='gray', ls='--', lw=1, label="Stage 1 end")
 plt.axvline(17000, color='gray', ls=':',  lw=1, label="Stage 2 end")
-plt.xlabel("step");  plt.ylabel("total loss")
-plt.title("Fourier Trans-PINN — Burgers training loss")
+plt.xlabel("step")
+plt.ylabel("total loss")
+plt.title("Fourier Trans-PINN — Burgers training loss (all 3 stages)")
 plt.legend(fontsize=9)
-plt.grid(True, which="both", ls="--", alpha=0.5)
+plt.grid(False)
 plt.tight_layout()
-plt.savefig("loss_curve.png", dpi=150);  plt.show()
+plt.savefig("loss_curve.png", dpi=600)
+plt.show()
 print("Saved: loss_curve.png")
 
+# ----------------------------------------------------------------
+# E: FDM vs Fourier Trans-PINN solution slices
+# ----------------------------------------------------------------
+fig3, axes3 = plt.subplots(1, 4, figsize=(18, 4))
+fig3.suptitle("Solution slices at fixed times", fontsize=12)
+
+for ax, frac in zip(axes3, [0.25, 0.50, 0.75, 1.00]):
+    idx = int(frac * (len(tg) - 1))
+    ax.plot(xg, utrue[idx], 'k-',  lw=2,   label="FDM")
+    ax.plot(xg, upred[idx], 'r--', lw=1.5, label="Fourier Trans-PINN")
+    ax.set_title(f"t = {tg[idx]:.2f}")
+    ax.set_xlabel("x")
+    ax.set_ylabel("u")
+    ax.legend(fontsize=8, loc="lower left")
+    ax.grid(False)
+
+plt.tight_layout()
+plt.savefig("fdm_vs_pinn_slices.png", dpi=600)
+plt.show()
+print("Saved: fdm_vs_pinn_slices.png")
+
+# ----------------------------------------------------------------
 # Final summary
+# ----------------------------------------------------------------
 print("\nFinal learnable loss weights:")
 print(f"  w_res = {torch.exp(model.log_w_res).item():.4f}")
 print(f"  w_ic  = {torch.exp(model.log_w_ic ).item():.4f}")
