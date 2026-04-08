@@ -1,6 +1,5 @@
 import os
 os.environ["PYTORCH_ALLOC_CONF"] = "expandable_segments:True"
-
 import gc
 import copy
 import warnings
@@ -419,14 +418,14 @@ fig, axes = plt.subplots(1, 3, figsize=(16, 5))
 kw = dict(aspect='auto', extent=[0, 1, 0, 1],
           origin='lower', cmap='RdBu_r')
 
-im0 = axes[0].imshow(utrue.T, **kw)
+im0 = axes[0].imshow(utrue, **kw)
 axes[0].set_title("FDM Ground Truth")
 axes[0].set_xlabel("t")
 axes[0].set_ylabel("x")
 axes[0].grid(False)
 plt.colorbar(im0, ax=axes[0])
 
-im1 = axes[1].imshow(upred.T, **kw)
+im1 = axes[1].imshow(upred, **kw)
 axes[1].set_title("Fourier Trans-PINN")
 axes[1].set_xlabel("t")
 axes[1].grid(False)
@@ -445,23 +444,48 @@ plt.savefig("heatmap_spacetime.png", dpi=600)
 plt.show()
 print("Saved: heatmap_spacetime.png")
 
-# B: Solution slices at t=0.25, 0.50, 0.75, 1.0  
-fig2, axes2 = plt.subplots(1, 4, figsize=(18, 4))
-fig2.suptitle("Solution slices at fixed times", fontsize=12)
-for ax, frac in zip(axes2, [0.25, 0.50, 0.75, 1.0]):
+# B1: Solution slices (t = 0.25, 0.50)
+fig2, axes2 = plt.subplots(1, 2, figsize=(10, 4))
+fig2.suptitle("", fontsize=12)
+
+for ax, frac in zip(axes2, [0.25, 0.50]):
     idx = int(frac * (len(tg) - 1))
-    ax.plot(xg, utrue[idx], 'k-',  lw=2,   label="FDM")
-    ax.plot(xg, upred[idx], 'r--', lw=1.5, label="Fourier Trans-PINN")
+    
+    ax.plot(xg, utrue[idx], 'k-',  lw=3,   label="FDM")                  # wider
+    ax.plot(xg, upred[idx], 'r--', lw=2.5, label="Fourier Trans-PINN")   # wider
+    
     ax.set_title(f"t = {tg[idx]:.2f}")
     ax.set_xlabel("x")
     ax.set_ylabel("u")
     ax.legend(fontsize=8)
     ax.grid(False)
-plt.tight_layout()
-plt.savefig("solution_slices.png", dpi=600)
-plt.show()
-print("Saved: solution_slices.png")
 
+plt.tight_layout()
+plt.savefig("solution_slices_part1.png", dpi=600)
+plt.show()
+
+
+# B2: Solution slices (t = 0.75, 1.00)
+fig3, axes3 = plt.subplots(1, 2, figsize=(10, 4))
+fig3.suptitle("", fontsize=12)
+
+for ax, frac in zip(axes3, [0.75, 1.0]):
+    idx = int(frac * (len(tg) - 1))
+    
+    ax.plot(xg, utrue[idx], 'k-',  lw=3,   label="FDM")                  # wider
+    ax.plot(xg, upred[idx], 'r--', lw=2.5, label="Fourier Trans-PINN")   # wider
+    
+    ax.set_title(f"t = {tg[idx]:.2f}")
+    ax.set_xlabel("x")
+    ax.set_ylabel("u")
+    ax.legend(fontsize=8)
+    ax.grid(False)
+
+plt.tight_layout()
+plt.savefig("solution_slices_part2.png", dpi=600)
+plt.show()
+
+print("Saved: solution_slices_part1.png & solution_slices_part2.png")
 # C: L2 error over time 
 l2_t = [np.sqrt(np.sum((utrue[i] - upred[i])**2)
                 / (np.sum(utrue[i]**2) + 1e-12)) for i in range(len(tg))]
@@ -483,7 +507,7 @@ plt.axvline(2000,  color='gray', ls='--', lw=1, label="Stage 1 end")
 plt.axvline(12000, color='gray', ls=':',  lw=1, label="Stage 2 end")
 plt.xlabel("step")
 plt.ylabel("total loss")
-plt.title("Fourier Trans-PINN — Advection-Diffusion training loss")
+plt.title("")
 plt.legend(fontsize=9)
 plt.grid(False)
 plt.tight_layout()
