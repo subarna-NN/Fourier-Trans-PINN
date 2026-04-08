@@ -472,7 +472,7 @@ plt.axvline(2000,  color='gray', ls='--', lw=1, label="Stage 1 end")
 plt.axvline(12000, color='gray', ls=':',  lw=1, label="Stage 2 end")
 plt.xlabel("step")
 plt.ylabel("total loss")
-plt.title("Fourier Trans-PINN — Wave training loss")
+plt.title("")
 plt.legend(fontsize=9)
 plt.grid(False)
 plt.tight_layout()
@@ -481,30 +481,63 @@ plt.show()
 print("Saved: loss_curve.png")
 
 # ----------------------------------------------------------------
-# E: FDM vs Trans-PINN solution slices
+# E1: FDM vs Trans-PINN solution slices (t = 0.25, 0.50)
 # ----------------------------------------------------------------
-y_mid_idx = Ny // 2   # index closest to y = 0.5
+y_mid_idx = Ny // 2
 
-fig3, axes3 = plt.subplots(1, 4, figsize=(18, 4))
-fig3.suptitle("Solution slices at fixed times", fontsize=12)
+fig3, axes3 = plt.subplots(1, 2, figsize=(10, 4))
+fig3.suptitle("", fontsize=12)
 
-for ax, frac in zip(axes3, [0.25, 0.50, 0.75, 1.00]):
+for ax, frac in zip(axes3, [0.25, 0.50]):
     idx = int(frac * (Nt - 1))
     u_fdm_slice  = utrue[idx, :, y_mid_idx]
     u_pinn_slice = upred[idx, :, y_mid_idx]
-    ax.plot(xg, u_fdm_slice,  'k-',  lw=2,   label="FDM")
-    ax.plot(xg, u_pinn_slice, 'r--', lw=1.5, label="Fourier Trans-PINN")
+
+    ax.plot(xg, u_fdm_slice,  'k-',  lw=3,   label="FDM")                  # thicker
+    ax.plot(xg, u_pinn_slice, 'r--', lw=2.5, label="Fourier Trans-PINN")   # thicker
+
     ax.set_title(f"t = {tg[idx]:.2f}")
     ax.set_xlabel("x")
     ax.set_ylabel("u")
-    ax.legend(fontsize=8, loc="lower left")
+
+    # ✅ legend automatically moves to empty region
+    ax.legend(fontsize=8, loc="best", frameon=True, framealpha=0.8)
+
     ax.grid(False)
 
 plt.tight_layout()
-plt.savefig("fdm_vs_pinn_slices.png", dpi=600)
+plt.savefig("fdm_vs_pinn_slices_part1.png", dpi=600)
 plt.show()
-print("Saved: fdm_vs_pinn_slices.png")
 
+
+# ----------------------------------------------------------------
+# E2: FDM vs Trans-PINN solution slices (t = 0.75, 1.00)
+# ----------------------------------------------------------------
+fig4, axes4 = plt.subplots(1, 2, figsize=(10, 4))
+fig4.suptitle("", fontsize=12)
+
+for ax, frac in zip(axes4, [0.75, 1.00]):
+    idx = int(frac * (Nt - 1))
+    u_fdm_slice  = utrue[idx, :, y_mid_idx]
+    u_pinn_slice = upred[idx, :, y_mid_idx]
+
+    ax.plot(xg, u_fdm_slice,  'k-',  lw=3,   label="FDM")
+    ax.plot(xg, u_pinn_slice, 'r--', lw=2.5, label="Fourier Trans-PINN")
+
+    ax.set_title(f"t = {tg[idx]:.2f}")
+    ax.set_xlabel("x")
+    ax.set_ylabel("u")
+
+    # ✅ legend auto placement
+    ax.legend(fontsize=8, loc="best", frameon=True, framealpha=0.8)
+
+    ax.grid(False)
+
+plt.tight_layout()
+plt.savefig("fdm_vs_pinn_slices_part2.png", dpi=600)
+plt.show()
+
+print("Saved: fdm_vs_pinn_slices_part1.png & fdm_vs_pinn_slices_part2.png")
 # ----------------------------------------------------------------
 # Final summary
 # ----------------------------------------------------------------
