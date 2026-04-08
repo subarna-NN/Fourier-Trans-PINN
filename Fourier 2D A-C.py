@@ -33,14 +33,14 @@ pi  = torch.tensor(np.pi, device=device)
 print(f"epsilon    : {eps}")
 
 # ================================================================
-# 3.  Memory budget 
+# 3.  Memory budget
 # ================================================================
 N_RES       = 2000
 N_RAR_PROBE = 6000
 N_RAR_KEEP  = 1200
 
 # ================================================================
-# 4.  Fourier Embedding  
+# 4.  Fourier Embedding
 # ================================================================
 class FourierEmbedding(nn.Module):
     def __init__(self, in_dim=3, n_freq=32, sigma=5.0):
@@ -55,7 +55,7 @@ class FourierEmbedding(nn.Module):
                           torch.cos(proj)], dim=-1)
 
 # ================================================================
-# 5.  Pseudo-sequence 
+# 5.  Pseudo-sequence
 # ================================================================
 def pseudo_sequence(xt, dx):
     x = xt[:, 0:1];  y = xt[:, 1:2];  t = xt[:, 2:3]
@@ -66,7 +66,7 @@ def pseudo_sequence(xt, dx):
     ], dim=1)
 
 # ================================================================
-# 6.  Transformer Block 
+# 6.  Transformer Block
 # ================================================================
 class TransformerBlock(nn.Module):
     def __init__(self, d_model=64, nhead=4):
@@ -142,7 +142,7 @@ t = torch.linspace(0, 1, Nt)
 dx = x[1] - x[0]
 
 # ================================================================
-# 10.  Initial Conditions  
+# 10.  Initial Conditions
 # ================================================================
 x_ic_g = torch.linspace(0, 1, 81)
 y_ic_g = torch.linspace(0, 1, 81)
@@ -179,7 +179,7 @@ bc = make_bc().to(device)
 print(f"BC points : {bc.shape[0]:,}")
 
 # ================================================================
-# 12.  Collocation helpers  
+# 12.  Collocation helpers
 # ================================================================
 def new_res():
     return torch.rand(N_RES, 3, device=device).requires_grad_(True)
@@ -187,7 +187,7 @@ def new_res():
 res = new_res()
 
 # ================================================================
-# 13.  PDE Residual  — Allen-Cahn 
+# 13.  PDE Residual  — Allen-Cahn
 # ================================================================
 def pde_residual(model, pts):
     u   = model(pts, dx)                              # (N, 1)
@@ -216,7 +216,7 @@ def pde_residual(model, pts):
     return torch.mean(f ** 2)
 
 # ================================================================
-# 14.  Full PINN loss — 3 terms 
+# 14.  Full PINN loss — 3 terms
 # ================================================================
 def pinn_loss(model, res_pts):
     loss_res = pde_residual(model, res_pts)
@@ -237,7 +237,7 @@ def pinn_loss(model, res_pts):
     return total, loss_res, loss_ic, loss_bc
 
 # ================================================================
-# 15.  RAR Resampling 
+# 15.  RAR Resampling
 # ================================================================
 def rar_resample(model):
     model.eval()
@@ -365,7 +365,7 @@ print(f"  Done — {_n[0]} evals")
 torch.cuda.empty_cache()
 
 # ================================================================
-# 17.  FDM Ground Truth — Allen-Cahn 
+# 17.  FDM Ground Truth — Allen-Cahn
 # ================================================================
 print("\nComputing FDM ground truth (odeint) ...")
 
@@ -398,7 +398,7 @@ utrue = utrue_flat.reshape(Nt, Nx, Ny)
 print("FDM done.")
 
 # ================================================================
-# 18.  Evaluation 
+# 18.  Evaluation
 # ================================================================
 upred = np.zeros_like(utrue)
 model.eval()
@@ -426,7 +426,7 @@ print(f"{'='*45}")
 xp, yp = np.meshgrid(xg, yg, indexing="ij")
 
 # ----------------------------------------------------------------
-# A: Final-time 3D surface 
+# A: Final-time 3D surface
 # ----------------------------------------------------------------
 fig = plt.figure(figsize=(18, 5))
 for col, (data, title, cm) in enumerate([
@@ -445,7 +445,7 @@ plt.show()
 print("Saved: snapshot_final.png")
 
 # ----------------------------------------------------------------
-# B: Mid-time contour 
+# B: Mid-time contour
 # ----------------------------------------------------------------
 mid = Nt // 2
 fig2, axes = plt.subplots(1, 3, figsize=(16, 4))
@@ -465,7 +465,7 @@ plt.show()
 print("Saved: snapshot_mid.png")
 
 # ----------------------------------------------------------------
-# C: L2 over time 
+# C: L2 over time
 # ----------------------------------------------------------------
 l2_t = [np.sqrt(np.sum((utrue[i]-upred[i])**2)
                 / (np.sum(utrue[i]**2)+1e-12)) for i in range(Nt)]
@@ -489,7 +489,7 @@ plt.axvline(2000,  color='gray', ls='--', lw=1, label="Stage 1 end")
 plt.axvline(12000, color='gray', ls=':',  lw=1, label="Stage 2 end")
 plt.xlabel("step")
 plt.ylabel("total loss")
-plt.title("Fourier Trans-PINN — Allen-Cahn training loss")
+plt.title("")
 plt.legend(fontsize=9)
 plt.grid(False)
 plt.tight_layout()
@@ -498,30 +498,63 @@ plt.show()
 print("Saved: loss_curve.png")
 
 # ----------------------------------------------------------------
-# E: FDM vs Fourier Trans-PINN solution slices
+# E1: Solution slices (t = 0.25, 0.50)
 # ----------------------------------------------------------------
-y_mid_idx = Ny // 2   # index closest to y = 0.5
+y_mid_idx = Ny // 2
 
-fig3, axes3 = plt.subplots(1, 4, figsize=(18, 4))
-fig3.suptitle("Solution slices at fixed times", fontsize=12)
+fig3, axes3 = plt.subplots(1, 2, figsize=(10, 4))
+fig3.suptitle("", fontsize=12)
 
-for ax, frac in zip(axes3, [0.25, 0.50, 0.75, 1.00]):
+for ax, frac in zip(axes3, [0.25, 0.50]):
     idx = int(frac * (Nt - 1))
     u_fdm  = utrue[idx, :, y_mid_idx]
     u_pinn = upred[idx, :, y_mid_idx]
-    ax.plot(xg, u_fdm,  'k-',  lw=2,   label="FDM")
-    ax.plot(xg, u_pinn, 'r--', lw=1.5, label="Fourier Trans-PINN")
+
+    ax.plot(xg, u_fdm,  'k-',  lw=3,   label="FDM")
+    ax.plot(xg, u_pinn, 'r--', lw=2.5, label="Fourier Trans-PINN")
+
     ax.set_title(f"t = {tg[idx]:.2f}")
     ax.set_xlabel("x")
     ax.set_ylabel("u")
-    ax.legend(fontsize=8, loc="lower left")
+
+    # ✅ improved legend placement (auto + clean)
+    ax.legend(fontsize=8, loc="best", frameon=True, framealpha=0.8)
+
     ax.grid(False)
 
 plt.tight_layout()
-plt.savefig("solution_slices.png", dpi=600)
+plt.savefig("solution_slices_part1.png", dpi=600)
 plt.show()
-print("Saved: solution_slices.png")
 
+
+# ----------------------------------------------------------------
+# E2: Solution slices (t = 0.75, 1.00)
+# ----------------------------------------------------------------
+fig4, axes4 = plt.subplots(1, 2, figsize=(10, 4))
+fig4.suptitle("", fontsize=12)
+
+for ax, frac in zip(axes4, [0.75, 1.00]):
+    idx = int(frac * (Nt - 1))
+    u_fdm  = utrue[idx, :, y_mid_idx]
+    u_pinn = upred[idx, :, y_mid_idx]
+
+    ax.plot(xg, u_fdm,  'k-',  lw=3,   label="FDM")
+    ax.plot(xg, u_pinn, 'r--', lw=2.5, label="Fourier Trans-PINN")
+
+    ax.set_title(f"t = {tg[idx]:.2f}")
+    ax.set_xlabel("x")
+    ax.set_ylabel("u")
+
+    # ✅ improved legend placement
+    ax.legend(fontsize=8, loc="best", frameon=True, framealpha=0.8)
+
+    ax.grid(False)
+
+plt.tight_layout()
+plt.savefig("solution_slices_part2.png", dpi=600)
+plt.show()
+
+print("Saved: solution_slices_part1.png & solution_slices_part2.png")
 # ----------------------------------------------------------------
 # Final weight summary
 # ----------------------------------------------------------------
